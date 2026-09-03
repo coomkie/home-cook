@@ -1,12 +1,15 @@
 import {
   BadGatewayException,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { type ConfigType } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 import { HttpService } from '@nestjs/axios';
 import { UserResponseDto } from '@app/shared';
 import { AxiosError } from 'axios';
+import { appEnv } from '../app.env';
 
 /**
  * Client gọi sang user-service qua HTTP.
@@ -14,10 +17,14 @@ import { AxiosError } from 'axios';
  */
 @Injectable()
 export class UserClientService {
-  private readonly baseUrl =
-    process.env.USER_SERVICE_URL ?? 'http://localhost:3001';
+  private readonly baseUrl: string;
 
-  constructor(private readonly http: HttpService) {}
+  constructor(
+    private readonly http: HttpService,
+    @Inject(appEnv.KEY) env: ConfigType<typeof appEnv>,
+  ) {
+    this.baseUrl = env.userServiceUrl;
+  }
 
   async getUserById(userId: string): Promise<UserResponseDto> {
     try {
@@ -28,13 +35,15 @@ export class UserClientService {
     } catch (error) {
       const axiosError = error as AxiosError;
       if (axiosError.response?.status === 404) {
-        throw new NotFoundException(
-          `Author ${userId} not found in user-service`,
-        );
+        throw new NotFoundException({
+          message: 'errors.authorNotFound',
+          args: { id: userId },
+        });
       }
-      throw new BadGatewayException(
-        `user-service unavailable: ${axiosError.message}`,
-      );
+      throw new BadGatewayException({
+        message: 'errors.userServiceUnavailable',
+        args: { detail: axiosError.message },
+      });
     }
   }
 }

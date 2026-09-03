@@ -16,7 +16,8 @@
       "entryFile": "main",
       "sourceRoot": "apps/backend/api-gateway/src",
       "compilerOptions": {
-        "tsConfigPath": "apps/backend/api-gateway/tsconfig.app.json"
+        "tsConfigPath": "apps/backend/api-gateway/tsconfig.app.json",
+        "webpackConfigPath": "apps/backend/api-gateway/webpack.config.js"
       }
     },
     "recipe-service": {
@@ -25,7 +26,8 @@
       "entryFile": "main",
       "sourceRoot": "apps/backend/recipe-service/src",
       "compilerOptions": {
-        "tsConfigPath": "apps/backend/recipe-service/tsconfig.app.json"
+        "tsConfigPath": "apps/backend/recipe-service/tsconfig.app.json",
+        "webpackConfigPath": "apps/backend/recipe-service/webpack.config.js"
       }
     },
     "user-service": {
@@ -34,7 +36,8 @@
       "entryFile": "main",
       "sourceRoot": "apps/backend/user-service/src",
       "compilerOptions": {
-        "tsConfigPath": "apps/backend/user-service/tsconfig.app.json"
+        "tsConfigPath": "apps/backend/user-service/tsconfig.app.json",
+        "webpackConfigPath": "apps/backend/user-service/webpack.config.js"
       }
     },
     "shared": {

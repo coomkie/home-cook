@@ -1,28 +1,74 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
-import { CreateRecipeDto, RecipeResponseDto } from '@app/shared';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+import {
+  CreateRecipeDraftDto,
+  UpdateRecipeDraftDto,
+} from '@app/shared';
+import { CurrentUser, type RequestUser } from '../auth/auth.decorators';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RecipesService } from './recipes.service';
 
 @Controller('recipes')
 export class RecipesController {
-  constructor(private readonly recipesService: RecipesService) {}
-
-  @Post()
-  create(@Body() dto: CreateRecipeDto): Promise<RecipeResponseDto> {
-    return this.recipesService.create(dto);
-  }
+  constructor(private readonly recipes: RecipesService) {}
 
   @Get()
-  findAll(
-    @Query('authorId') authorId?: string,
-  ): Promise<RecipeResponseDto[]> {
-    if (authorId) {
-      return this.recipesService.findByAuthor(authorId);
-    }
-    return this.recipesService.findAll();
+  listPublished(@Query('q') q?: string) {
+    return this.recipes.searchPublished(q);
+  }
+
+  @Get('mine')
+  @UseGuards(JwtAuthGuard)
+  listMine(@CurrentUser() user: RequestUser) {
+    return this.recipes.listMine(user.userId);
+  }
+
+  @Post()
+  @UseGuards(JwtAuthGuard)
+  create(
+    @CurrentUser() user: RequestUser,
+    @Body() dto: CreateRecipeDraftDto,
+  ) {
+    return this.recipes.createDraft(user.userId, dto);
+  }
+
+  @Get(':id/editor')
+  @UseGuards(JwtAuthGuard)
+  editor(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    return this.recipes.getEditor(id, user.userId);
+  }
+
+  @Patch(':id/draft')
+  @UseGuards(JwtAuthGuard)
+  updateDraft(
+    @CurrentUser() user: RequestUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateRecipeDraftDto,
+  ) {
+    return this.recipes.updateDraft(id, user.userId, dto);
+  }
+
+  @Post(':id/publish')
+  @UseGuards(JwtAuthGuard)
+  publish(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    return this.recipes.publish(id, user.userId);
+  }
+
+  @Get(':id/preview')
+  preview(@Param('id') id: string) {
+    return this.recipes.getPreview(id);
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string): Promise<RecipeResponseDto> {
-    return this.recipesService.findOne(id);
+  detail(@Param('id') id: string) {
+    return this.recipes.getPublicDetail(id);
   }
 }

@@ -1,26 +1,64 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ConfigModule, ConfigType } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { RecipesModule } from './recipes/recipes.module';
+import { AuthModule } from './auth/auth.module';
+import { HealthController } from './health.controller';
+import { IngredientsModule } from './ingredients/ingredients.module';
+import { IngredientEntity } from './ingredients/ingredient.entity';
+import { UnitEntity } from './ingredients/unit.entity';
+import { MediaModule } from './media/media.module';
+import { MediaAssetEntity } from './media/media-asset.entity';
+import { IngredientGroupEntity } from './recipes/ingredient-group.entity';
 import { RecipeEntity } from './recipes/recipe.entity';
+import { RecipeIngredientEntity } from './recipes/recipe-ingredient.entity';
+import { RecipeStepEntity } from './recipes/recipe-step.entity';
+import { RecipeVersionEntity } from './recipes/recipe-version.entity';
+import { RecipesModule } from './recipes/recipes.module';
+import { StepMediaEntity } from './recipes/step-media.entity';
+import { SubRecipeReferenceEntity } from './recipes/sub-recipe-reference.entity';
+import { ReviewsStubController } from './reviews/reviews-stub.controller';
+import { SeedModule } from './seed/seed.module';
+import { appEnv } from './app.env';
+
+const entities = [
+  MediaAssetEntity,
+  UnitEntity,
+  IngredientEntity,
+  RecipeEntity,
+  RecipeVersionEntity,
+  IngredientGroupEntity,
+  RecipeIngredientEntity,
+  RecipeStepEntity,
+  StepMediaEntity,
+  SubRecipeReferenceEntity,
+];
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: ['.env'],
+      load: [appEnv],
+    }),
     TypeOrmModule.forRootAsync({
-      inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
+      inject: [appEnv.KEY],
+      useFactory: (env: ConfigType<typeof appEnv>) => ({
         type: 'postgres' as const,
-        host: config.get<string>('RECIPE_DB_HOST', 'localhost'),
-        port: Number(config.get('RECIPE_DB_PORT', 5432)),
-        username: config.get<string>('RECIPE_DB_USER', 'recipes'),
-        password: config.get<string>('RECIPE_DB_PASSWORD', 'recipes'),
-        database: config.get<string>('RECIPE_DB_NAME', 'recipes_db'),
-        entities: [RecipeEntity],
-        synchronize: true, // học tập OK; prod dùng migration
+        host: env.dbHost,
+        port: env.dbPort,
+        username: env.dbUser,
+        password: env.dbPassword,
+        database: env.dbName,
+        entities,
+        synchronize: true,
       }),
     }),
+    AuthModule,
+    MediaModule,
+    IngredientsModule,
     RecipesModule,
+    SeedModule,
   ],
+  controllers: [HealthController, ReviewsStubController],
 })
 export class RecipeServiceModule {}

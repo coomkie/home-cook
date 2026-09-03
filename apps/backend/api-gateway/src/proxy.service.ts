@@ -21,12 +21,21 @@ export class ProxyService {
     path: string,
     body?: unknown,
     params?: Record<string, string | undefined>,
+    headers?: Record<string, string | undefined>,
   ): Promise<T> {
+    const cleanHeaders: Record<string, string> = {};
+    if (headers) {
+      for (const [key, value] of Object.entries(headers)) {
+        if (value) cleanHeaders[key] = value;
+      }
+    }
+
     const config: AxiosRequestConfig = {
       method,
       url: `${baseUrl}${path}`,
       data: body,
       params,
+      headers: cleanHeaders,
     };
 
     try {
@@ -40,9 +49,10 @@ export class ProxyService {
           axiosError.response.status,
         );
       }
-      throw new BadGatewayException(
-        `Upstream ${baseUrl} unavailable: ${axiosError.message}`,
-      );
+      throw new BadGatewayException({
+        message: 'errors.upstreamUnavailable',
+        args: { url: baseUrl, detail: axiosError.message },
+      });
     }
   }
 }

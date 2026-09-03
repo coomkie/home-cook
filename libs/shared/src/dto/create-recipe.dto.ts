@@ -12,42 +12,42 @@ import {
 import { Type } from 'class-transformer';
 
 export class IngredientDto {
-  @IsString()
-  @MinLength(1)
+  @IsString({ message: 'validation.string' })
+  @MinLength(1, { message: 'validation.ingredientsMin' })
   name: string;
 
-  @IsString()
-  @MinLength(1)
+  @IsString({ message: 'validation.string' })
+  @MinLength(1, { message: 'validation.ingredientsMin' })
   amount: string;
 }
 
 export class CreateRecipeDto {
-  @IsString()
-  @MinLength(3)
+  @IsString({ message: 'validation.string' })
+  @MinLength(3, { message: 'validation.titleMin' })
   title: string;
 
-  @IsString()
-  @MinLength(10)
+  @IsString({ message: 'validation.string' })
+  @MinLength(10, { message: 'validation.descriptionMin' })
   description: string;
 
   @IsArray()
-  @ArrayMinSize(1)
+  @ArrayMinSize(1, { message: 'validation.ingredientsMin' })
   @ValidateNested({ each: true })
   @Type(() => IngredientDto)
   ingredients: IngredientDto[];
 
   @IsArray()
-  @ArrayMinSize(1)
-  @IsString({ each: true })
+  @ArrayMinSize(1, { message: 'validation.stepsMin' })
+  @IsString({ each: true, message: 'validation.string' })
   steps: string[];
 
   @IsInt()
-  @Min(1)
+  @Min(1, { message: 'validation.cookTimeMin' })
   cookTimeMinutes: number;
 
-  @IsIn(['easy', 'medium', 'hard'])
+  @IsIn(['easy', 'medium', 'hard'], { message: 'validation.difficulty' })
   difficulty: 'easy' | 'medium' | 'hard';
 
-  @IsUUID()
+  @IsUUID('4', { message: 'validation.authorIdUuid' })
   authorId: string;
 }
