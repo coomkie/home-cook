@@ -1,7 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { MediaService } from '../media/media.service';
+import { In, Repository } from 'typeorm';
 import { IngredientEntity } from '../ingredients/ingredient.entity';
 import { UnitEntity } from '../ingredients/unit.entity';
 
@@ -24,37 +23,41 @@ const UNITS: Array<{
   { code: 'clove', name: 'Clove', symbol: 'clove', unitType: 'COUNT', allowsDecimal: false },
 ];
 
-const INGREDIENTS: Array<{ vi: string; en: string; slug: string }> = [
+const INGREDIENTS: Array<{
+  vi: string;
+  en: string;
+  slug: string;
+  staple?: boolean;
+}> = [
   { vi: 'Cà chua', en: 'Tomato', slug: 'tomato' },
   { vi: 'Hành tây', en: 'Onion', slug: 'onion' },
   { vi: 'Tỏi', en: 'Garlic', slug: 'garlic' },
   { vi: 'Gừng', en: 'Ginger', slug: 'ginger' },
   { vi: 'Ớt', en: 'Chili', slug: 'chili' },
-  { vi: 'Muối', en: 'Salt', slug: 'salt' },
-  { vi: 'Đường', en: 'Sugar', slug: 'sugar' },
-  { vi: 'Tiêu', en: 'Pepper', slug: 'pepper' },
-  { vi: 'Nước mắm', en: 'Fish sauce', slug: 'fish-sauce' },
-  { vi: 'Dầu ăn', en: 'Cooking oil', slug: 'cooking-oil' },
+  { vi: 'Muối', en: 'Salt', slug: 'salt', staple: true },
+  { vi: 'Đường', en: 'Sugar', slug: 'sugar', staple: true },
+  { vi: 'Tiêu', en: 'Pepper', slug: 'pepper', staple: true },
+  { vi: 'Nước mắm', en: 'Fish sauce', slug: 'fish-sauce', staple: true },
   { vi: 'Trứng gà', en: 'Egg', slug: 'egg' },
-  { vi: 'Thịt heo', en: 'Pork', slug: 'pork' },
-  { vi: 'Thịt bò', en: 'Beef', slug: 'beef' },
-  { vi: 'Gà', en: 'Chicken', slug: 'chicken' },
-  { vi: 'Tôm', en: 'Shrimp', slug: 'shrimp' },
   { vi: 'Gạo', en: 'Rice', slug: 'rice' },
   { vi: 'Bột mì', en: 'Flour', slug: 'flour' },
   { vi: 'Sữa', en: 'Milk', slug: 'milk' },
   { vi: 'Bơ', en: 'Butter', slug: 'butter' },
   { vi: 'Phô mai', en: 'Cheese', slug: 'cheese' },
-  { vi: 'Nấm', en: 'Mushroom', slug: 'mushroom' },
   { vi: 'Cà rốt', en: 'Carrot', slug: 'carrot' },
   { vi: 'Khoai tây', en: 'Potato', slug: 'potato' },
   { vi: 'Rau thơm', en: 'Herbs', slug: 'herbs' },
-  { vi: 'Nước cốt chanh', en: 'Lime juice', slug: 'lime-juice' },
-  { vi: 'Nước dừa', en: 'Coconut water', slug: 'coconut-water' },
   { vi: 'Đậu phụ', en: 'Tofu', slug: 'tofu' },
-  { vi: 'Mì', en: 'Noodles', slug: 'noodles' },
-  { vi: 'Bánh phở', en: 'Pho noodles', slug: 'pho-noodles' },
+  { vi: 'Thịt thăn heo', en: 'Pork Tenderloin', slug: 'pork-tenderloin' },
+  { vi: 'Bột chiên xù', en: 'Breadcrumbs', slug: 'breadcrumbs' },
+  { vi: 'Bột chiên giòn', en: 'Crispy Frying Flour', slug: 'crispy-frying-flour' },
+  { vi: 'Vani', en: 'Vanilla', slug: 'vanilla' },
   { vi: 'Hành lá', en: 'Scallion', slug: 'scallion' },
+  {
+    vi: 'Xốt gia vị hoàn chỉnh cà ri Barona',
+    en: 'Barona Curry Sauce',
+    slug: 'barona-curry-sauce',
+  },
 ];
 
 const SEED_OWNER = '00000000-0000-4000-8000-000000000001';
@@ -68,7 +71,6 @@ export class SeedService implements OnModuleInit {
     private readonly unitsRepo: Repository<UnitEntity>,
     @InjectRepository(IngredientEntity)
     private readonly ingredientsRepo: Repository<IngredientEntity>,
-    private readonly media: MediaService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -92,30 +94,32 @@ export class SeedService implements OnModuleInit {
       });
       if (exists) continue;
 
-      let imageAssetId: string | null = null;
-      try {
-        imageAssetId = await this.media.seedPlaceholderImage(
-          SEED_OWNER,
-          item.slug,
-        );
-      } catch (e) {
-        this.logger.warn(
-          `Skip image for ${item.slug}: ${e instanceof Error ? e.message : e}`,
-        );
-      }
-
+      // Images left empty for now — attach real media later.
       await this.ingredientsRepo.save(
         this.ingredientsRepo.create({
           canonicalName: item.vi,
           nameEn: item.en,
           slug: item.slug,
-          imageAssetId,
+          imageAssetId: null,
           status: 'APPROVED',
+          isStaple: !!item.staple,
           createdByUserId: SEED_OWNER,
           approvedByUserId: SEED_OWNER,
         }),
       );
     }
-    this.logger.log(`Ingredients seeded (${INGREDIENTS.length})`);
+
+    // Sync staple flags for existing rows (safe to re-run).
+    const stapleSlugs = INGREDIENTS.filter((i) => i.staple).map((i) => i.slug);
+    if (stapleSlugs.length) {
+      await this.ingredientsRepo.update(
+        { slug: In(stapleSlugs) },
+        { isStaple: true },
+      );
+    }
+
+    this.logger.log(
+      `Ingredients seeded (${INGREDIENTS.length}, staples: ${stapleSlugs.length}, images: empty)`,
+    );
   }
 }

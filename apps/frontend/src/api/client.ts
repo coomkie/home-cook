@@ -87,7 +87,9 @@ export async function uploadFile(file: File): Promise<MediaAssetRef> {
   const initiated = await request<{
     assetId: string
     uploadUrl: string
-    headers: Record<string, string>
+    method?: 'POST' | 'PUT'
+    fields?: Record<string, string>
+    headers?: Record<string, string>
   }>(
     '/media/uploads/initiate',
     {
@@ -101,12 +103,32 @@ export async function uploadFile(file: File): Promise<MediaAssetRef> {
     true,
   )
 
-  const put = await fetch(initiated.uploadUrl, {
-    method: 'PUT',
-    headers: initiated.headers,
-    body: file,
-  })
-  if (!put.ok) throw new Error(`Upload failed HTTP ${put.status}`)
+  if (initiated.method === 'POST' && initiated.fields) {
+    const form = new FormData()
+    form.append('file', file)
+    for (const [key, value] of Object.entries(initiated.fields)) {
+      form.append(key, value)
+    }
+    const uploaded = await fetch(initiated.uploadUrl, {
+      method: 'POST',
+      body: form,
+    })
+    if (!uploaded.ok) {
+      const detail = await uploaded.text().catch(() => '')
+      throw new Error(
+        detail
+          ? `Upload failed HTTP ${uploaded.status}: ${detail.slice(0, 200)}`
+          : `Upload failed HTTP ${uploaded.status}`,
+      )
+    }
+  } else {
+    const put = await fetch(initiated.uploadUrl, {
+      method: 'PUT',
+      headers: initiated.headers,
+      body: file,
+    })
+    if (!put.ok) throw new Error(`Upload failed HTTP ${put.status}`)
+  }
 
   return request<MediaAssetRef>(
     `/media/uploads/${initiated.assetId}/complete`,
@@ -145,6 +167,8 @@ export const api = {
     ),
 
   getUnits: () => request<Unit[]>('/units'),
+  getStapleIngredients: () =>
+    request<CatalogIngredient[]>('/ingredients/staples'),
   searchIngredients: (q?: string) => {
     const qs = q ? `?q=${encodeURIComponent(q)}` : ''
     return request<CatalogIngredient[]>(`/ingredients${qs}`)
@@ -186,4 +210,6 @@ export const api = {
     }, true),
   publishRecipe: (id: string) =>
     request<RecipeDetail>(`/recipes/${id}/publish`, { method: 'POST' }, true),
+  deleteDraft: (id: string) =>
+    request<void>(`/recipes/${id}`, { method: 'DELETE' }, true),
 }

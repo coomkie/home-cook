@@ -13,6 +13,7 @@ export function StudioPage() {
   const navigate = useNavigate()
   const [mine, setMine] = useState<RecipeListItem[]>([])
   const [creating, setCreating] = useState(false)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   useEffect(() => {
     if (!user) return
@@ -44,6 +45,29 @@ export function StudioPage() {
       )
     } finally {
       setCreating(false)
+    }
+  }
+
+  async function deleteDraft(recipe: RecipeListItem) {
+    if (recipe.status !== 'DRAFT') return
+    if (!window.confirm(t('studio.deleteDraftConfirm'))) return
+
+    setDeletingId(recipe.id)
+    try {
+      await api.deleteDraft(recipe.id)
+      try {
+        sessionStorage.removeItem(`studio-unlock:${recipe.id}`)
+      } catch {
+        /* ignore */
+      }
+      setMine((prev) => prev.filter((r) => r.id !== recipe.id))
+      toast.success(t('studio.deleted'))
+    } catch (e) {
+      toast.error(
+        apiMessage(e instanceof Error ? e.message : undefined, 'studio.deleteFailed'),
+      )
+    } finally {
+      setDeletingId(null)
     }
   }
 
@@ -81,27 +105,44 @@ export function StudioPage() {
           ) : (
             <ul className="recipe-grid">
               {mine.map((r) => (
-                <li key={r.id}>
-                  <Link
-                    to={
-                      r.status === 'PUBLISHED'
-                        ? `/recipes/${r.id}`
-                        : `/studio/recipes/${r.id}`
-                    }
-                    className="recipe-card"
-                  >
+                <li key={r.id} className="studio-card">
+                  <Link to={`/studio/recipes/${r.id}`} className="recipe-card">
                     <div className="recipe-card__meta">
                       <span className="pill">{r.status}</span>
                       <span>{t('common.minutes', { count: r.cookTimeMinutes })}</span>
                     </div>
                     <h2>{r.title}</h2>
                     <p>{r.summary}</p>
-                    {r.status !== 'PUBLISHED' && (
-                      <footer>
-                        <Link to={`/studio/recipes/${r.id}`}>{t('studio.continueEdit')}</Link>
-                      </footer>
-                    )}
+                    <footer>
+                      <span>
+                        {r.status === 'PUBLISHED'
+                          ? t('studio.editRecipe')
+                          : t('studio.continueEdit')}
+                      </span>
+                    </footer>
                   </Link>
+                  <div className="studio-card__actions">
+                    {r.status === 'PUBLISHED' && (
+                      <Link
+                        to={`/recipes/${r.id}`}
+                        className="btn ghost compact"
+                      >
+                        {t('studio.viewPublic')}
+                      </Link>
+                    )}
+                    {r.status === 'DRAFT' && (
+                      <button
+                        type="button"
+                        className="btn ghost compact studio-card__delete"
+                        disabled={deletingId === r.id}
+                        onClick={() => void deleteDraft(r)}
+                      >
+                        {deletingId === r.id
+                          ? t('studio.deleting')
+                          : t('studio.deleteDraft')}
+                      </button>
+                    )}
+                  </div>
                 </li>
               ))}
             </ul>

@@ -164,10 +164,7 @@ export class RecipesService {
 
   async getEditor(recipeId: string, userId: string): Promise<RecipeEditorDto> {
     const recipe = await this.requireOwned(recipeId, userId);
-    if (!recipe.activeDraftVersionId) {
-      throw new BadRequestException('errors.noDraftVersion');
-    }
-    const draft = await this.loadVersionGraph(recipe.activeDraftVersionId);
+    const draft = await this.ensureEditableDraft(recipe, userId);
     return {
       id: recipe.id,
       slug: recipe.slug,
@@ -183,11 +180,9 @@ export class RecipesService {
     dto: UpdateRecipeDraftDto,
   ): Promise<RecipeEditorDto> {
     const recipe = await this.requireOwned(recipeId, userId);
-    if (!recipe.activeDraftVersionId) {
-      throw new BadRequestException('errors.noDraftVersion');
-    }
+    const editable = await this.ensureEditableDraft(recipe, userId);
     const version = await this.versionsRepo.findOne({
-      where: { id: recipe.activeDraftVersionId },
+      where: { id: editable.id },
     });
     if (!version || version.status !== 'DRAFT') {
       throw new BadRequestException('errors.noDraftVersion');
@@ -217,6 +212,57 @@ export class RecipesService {
     }
 
     return this.getEditor(recipeId, userId);
+  }
+
+  async deleteDraft(recipeId: string, userId: string): Promise<void> {
+    const recipe = await this.requireOwned(recipeId, userId);
+    if (recipe.status !== 'DRAFT') {
+      throw new BadRequestException('errors.onlyDraftDeletable');
+    }
+
+    const versions = await this.versionsRepo.find({
+      where: { recipeId: recipe.id },
+    });
+    const versionIds = versions.map((v) => v.id);
+
+    if (versionIds.length) {
+      const referenced = await this.subRepo
+        .createQueryBuilder('ref')
+        .where('ref.child_recipe_version_id IN (:...ids)', { ids: versionIds })
+        .getCount();
+      if (referenced > 0) {
+        throw new BadRequestException('errors.draftReferenced');
+      }
+    }
+
+    recipe.activeDraftVersionId = null;
+    recipe.currentPublishedVersionId = null;
+    await this.recipesRepo.save(recipe);
+
+    const mediaIds = new Set<string>();
+    for (const version of versions) {
+      if (version.coverAssetId) mediaIds.add(version.coverAssetId);
+      const steps = await this.stepsRepo.find({
+        where: { recipeVersionId: version.id },
+        relations: ['media'],
+      });
+      for (const s of steps) {
+        for (const m of s.media ?? []) {
+          if (m.mediaAssetId) mediaIds.add(m.mediaAssetId);
+        }
+      }
+    }
+    if (mediaIds.size) {
+      await this.media.destroyMany([...mediaIds]);
+    }
+
+    for (const version of versions) {
+      await this.clearVersionChildren(version.id);
+    }
+    if (versions.length) {
+      await this.versionsRepo.remove(versions);
+    }
+    await this.recipesRepo.remove(recipe);
   }
 
   async publish(recipeId: string, userId: string): Promise<RecipeDetailDto> {
@@ -274,6 +320,118 @@ export class RecipesService {
     return recipe;
   }
 
+  /**
+   * Ensure there is a mutable DRAFT version.
+   * After publish, activeDraft often still points at the PUBLISHED version —
+   * clone it into a new DRAFT so edits don't mutate the live public copy.
+   */
+  private async ensureEditableDraft(
+    recipe: RecipeEntity,
+    userId: string,
+  ): Promise<RecipeVersionEntity> {
+    if (recipe.activeDraftVersionId) {
+      const current = await this.versionsRepo.findOne({
+        where: { id: recipe.activeDraftVersionId },
+      });
+      if (current?.status === 'DRAFT') {
+        return this.loadVersionGraph(current.id);
+      }
+    }
+
+    const sourceId =
+      recipe.currentPublishedVersionId ?? recipe.activeDraftVersionId;
+    if (!sourceId) {
+      throw new BadRequestException('errors.noDraftVersion');
+    }
+
+    const source = await this.loadVersionGraph(sourceId);
+    const maxVersion = await this.versionsRepo
+      .createQueryBuilder('v')
+      .select('MAX(v.versionNumber)', 'max')
+      .where('v.recipeId = :recipeId', { recipeId: recipe.id })
+      .getRawOne<{ max: string | null }>();
+    const nextNumber = Number(maxVersion?.max ?? source.versionNumber) + 1;
+
+    const draft = await this.versionsRepo.save(
+      this.versionsRepo.create({
+        recipeId: recipe.id,
+        versionNumber: nextNumber,
+        status: 'DRAFT',
+        title: source.title,
+        summary: source.summary,
+        coverAssetId: source.coverAssetId ?? null,
+        servings: source.servings,
+        prepTimeMinutes: source.prepTimeMinutes,
+        cookTimeMinutes: source.cookTimeMinutes,
+        difficulty: source.difficulty,
+        createdByUserId: userId,
+      }),
+    );
+
+    for (const g of source.ingredientGroups ?? []) {
+      const group = await this.groupsRepo.save(
+        this.groupsRepo.create({
+          recipeVersionId: draft.id,
+          name: g.name,
+          position: g.position,
+        }),
+      );
+      for (const line of g.ingredients ?? []) {
+        await this.linesRepo.save(
+          this.linesRepo.create({
+            ingredientGroupId: group.id,
+            ingredientId: line.ingredientId ?? null,
+            customName: line.customName ?? null,
+            quantityMin: line.quantityMin ?? null,
+            quantityMax: line.quantityMax ?? null,
+            unitId: line.unitId ?? null,
+            unitText: line.unitText ?? null,
+            preparationNote: line.preparationNote ?? null,
+            isOptional: line.isOptional,
+            position: line.position,
+          }),
+        );
+      }
+    }
+
+    for (const step of source.steps ?? []) {
+      const saved = await this.stepsRepo.save(
+        this.stepsRepo.create({
+          recipeVersionId: draft.id,
+          position: step.position,
+          mode: step.mode,
+          title: step.title ?? null,
+          instruction: step.instruction ?? null,
+          tip: step.tip ?? null,
+        }),
+      );
+      for (const m of step.media ?? []) {
+        await this.stepMediaRepo.save(
+          this.stepMediaRepo.create({
+            recipeStepId: saved.id,
+            mediaAssetId: m.mediaAssetId,
+            position: m.position,
+            caption: m.caption ?? null,
+          }),
+        );
+      }
+      if (step.mode === 'SUB_RECIPE' && step.subRecipe) {
+        await this.subRepo.save(
+          this.subRepo.create({
+            stepId: saved.id,
+            childRecipeVersionId: step.subRecipe.childRecipeVersionId,
+            servingMultiplier: step.subRecipe.servingMultiplier ?? '1',
+          }),
+        );
+      }
+    }
+
+    recipe.activeDraftVersionId = draft.id;
+    await this.recipesRepo.save(recipe);
+
+    return this.loadVersionGraph(draft.id);
+  }
+
   private async loadVersionGraph(versionId: string): Promise<RecipeVersionEntity> {
     const version = await this.versionsRepo.findOne({
       where: { id: versionId },
@@ -310,6 +468,29 @@ export class RecipesService {
       s.media = (s.media ?? []).sort((a, b) => a.position - b.position);
     }
     return version;
+  }
+
+  private async clearVersionChildren(versionId: string): Promise<void> {
+    const groups = await this.groupsRepo.find({
+      where: { recipeVersionId: versionId },
+      relations: ['ingredients'],
+    });
+    for (const g of groups) {
+      if (g.ingredients?.length) {
+        await this.linesRepo.remove(g.ingredients);
+      }
+    }
+    if (groups.length) await this.groupsRepo.remove(groups);
+
+    const steps = await this.stepsRepo.find({
+      where: { recipeVersionId: versionId },
+      relations: ['media', 'subRecipe'],
+    });
+    for (const s of steps) {
+      if (s.media?.length) await this.stepMediaRepo.remove(s.media);
+      if (s.subRecipe) await this.subRepo.remove(s.subRecipe);
+    }
+    if (steps.length) await this.stepsRepo.remove(steps);
   }
 
   private async replaceGroups(
@@ -360,10 +541,15 @@ export class RecipesService {
               ? null
               : line.customName?.trim() ?? null,
             quantityMin:
-              line.quantityMin != null ? String(line.quantityMin) : null,
+              line.quantityMin !== undefined && line.quantityMin !== null
+                ? String(line.quantityMin)
+                : null,
             quantityMax:
-              line.quantityMax != null ? String(line.quantityMax) : null,
+              line.quantityMax !== undefined && line.quantityMax !== null
+                ? String(line.quantityMax)
+                : null,
             unitId: line.unitId ?? null,
+            unitText: line.unitText?.trim() || null,
             preparationNote: line.preparationNote?.trim() ?? null,
             isOptional: line.isOptional ?? false,
             position: iPos++,
@@ -614,6 +800,10 @@ export class RecipesService {
               imageUrl,
               quantityMin: line.quantityMin != null ? Number(line.quantityMin) : undefined,
               quantityMax: line.quantityMax != null ? Number(line.quantityMax) : undefined,
+              unitText:
+                line.unitText?.trim() ||
+                line.unit?.symbol ||
+                undefined,
               unit: line.unit
                 ? {
                     id: line.unit.id,
@@ -706,6 +896,7 @@ export class RecipesService {
       status: version.status,
       title: version.title,
       summary: version.summary,
+      coverAssetId: version.coverAssetId ?? undefined,
       coverUrl,
       servings: Number(version.servings),
       prepTimeMinutes: version.prepTimeMinutes,

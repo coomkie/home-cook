@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { useI18n } from '../i18n/I18nContext'
+import { formatIngredientAmount } from '../lib/ingredient-amount'
 import type { RecipeDetail, RecipeStepView } from '../types'
 
 type Props = {
@@ -100,11 +101,7 @@ export function SubRecipeSheet({ recipeId, onClose }: Props) {
                       )}{' '}
                       {ing.name}
                     </span>
-                    <span>
-                      {ing.quantityMin ?? ''}
-                      {ing.quantityMax != null ? `–${ing.quantityMax}` : ''}{' '}
-                      {ing.unit?.symbol ?? ''}
-                    </span>
+                    <span>{formatIngredientAmount(ing)}</span>
                   </li>
                 )),
               )}

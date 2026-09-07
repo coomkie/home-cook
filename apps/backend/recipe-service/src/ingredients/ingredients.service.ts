@@ -34,20 +34,31 @@ export class IngredientsService {
   }
 
   async search(q?: string, status: 'APPROVED' | 'PENDING' = 'APPROVED') {
-    const where = q?.trim()
-      ? [
-          { status, canonicalName: ILike(`%${q.trim()}%`) },
-          { status, nameEn: ILike(`%${q.trim()}%`) },
-        ]
-      : { status };
+    const needle = q?.trim();
+    // Catalog is large — require a query; don't dump the whole warehouse.
+    if (!needle) {
+      return [];
+    }
 
     const rows = await this.ingredientsRepo.find({
-      where,
+      where: [
+        { status, canonicalName: ILike(`%${needle}%`) },
+        { status, nameEn: ILike(`%${needle}%`) },
+      ],
       order: { canonicalName: 'ASC' },
-      take: 50,
+      take: 20,
       relations: ['imageAsset'],
     });
 
+    return Promise.all(rows.map((r) => this.toDto(r)));
+  }
+
+  async listStaples() {
+    const rows = await this.ingredientsRepo.find({
+      where: { status: 'APPROVED', isStaple: true },
+      order: { canonicalName: 'ASC' },
+      relations: ['imageAsset'],
+    });
     return Promise.all(rows.map((r) => this.toDto(r)));
   }
 
@@ -132,6 +143,7 @@ export class IngredientsService {
       nameEn: row.nameEn ?? undefined,
       slug: row.slug,
       status: row.status,
+      isStaple: row.isStaple,
       imageAssetId: row.imageAssetId ?? undefined,
       imageUrl,
       createdByUserId: row.createdByUserId ?? undefined,

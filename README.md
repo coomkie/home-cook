@@ -8,7 +8,7 @@ Product vision: [specs.md](specs.md) (Home-cook).
 ## Current scope
 
 - Auth + profile (JWT), i18n en/vi
-- **Recipe Studio**: draft/publish, ingredient catalog (seed + user propose → MOD approve), step/cover media via **MinIO presign**, exclusive **sub-recipe** steps + bottom-sheet preview
+- **Recipe Studio**: draft/publish, ingredient catalog (seed + user propose → MOD approve), step/cover media via **Cloudinary**, exclusive **sub-recipe** steps + bottom-sheet preview
 
 After recipe schema changes:
 
@@ -39,7 +39,7 @@ npm run start:frontend
 |---------|-----|
 | Frontend | http://localhost:5173 |
 | Gateway / Swagger | http://localhost:3000 · /api/docs |
-| MinIO console | http://localhost:9001 (minioadmin/minioadmin) |
 | Mailpit | http://localhost:8025 |
+| Cloudinary | Media CDN (see `CLOUDINARY_*` in `.env`) |
 
 Create recipes from **Studio** (`/studio`). Public list only shows `PUBLISHED` recipes.

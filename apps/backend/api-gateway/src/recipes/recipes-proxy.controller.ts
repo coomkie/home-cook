@@ -1,8 +1,10 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
+  HttpCode,
   Inject,
   Param,
   Patch,
@@ -127,6 +129,23 @@ export class RecipesProxyController {
       this.recipeServiceUrl,
       'POST',
       `/recipes/${id}/publish`,
+      undefined,
+      undefined,
+      this.fwd(authorization, acceptLanguage),
+    );
+  }
+
+  @Delete(':id')
+  @HttpCode(204)
+  deleteDraft(
+    @Param('id') id: string,
+    @Headers('authorization') authorization?: string,
+    @Headers('accept-language') acceptLanguage?: string,
+  ): Promise<void> {
+    return this.proxy.forward(
+      this.recipeServiceUrl,
+      'DELETE',
+      `/recipes/${id}`,
       undefined,
       undefined,
       this.fwd(authorization, acceptLanguage),

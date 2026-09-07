@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigType } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { join } from 'path';
 import { AuthModule } from './auth/auth.module';
 import { HealthController } from './health.controller';
 import { IngredientsModule } from './ingredients/ingredients.module';
@@ -37,7 +38,7 @@ const entities = [
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: ['.env'],
+      envFilePath: [join(process.cwd(), '.env'), '.env'],
       load: [appEnv],
     }),
     TypeOrmModule.forRootAsync({

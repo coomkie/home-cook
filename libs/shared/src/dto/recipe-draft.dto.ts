@@ -27,16 +27,23 @@ export class DraftIngredientLineDto {
   customName?: string;
 
   @IsOptional()
+  @ValidateIf((_: DraftIngredientLineDto, v: unknown) => v !== null)
   @IsNumber()
-  quantityMin?: number;
+  quantityMin?: number | null;
 
   @IsOptional()
+  @ValidateIf((_: DraftIngredientLineDto, v: unknown) => v !== null)
   @IsNumber()
-  quantityMax?: number;
+  quantityMax?: number | null;
 
   @IsOptional()
   @IsUUID()
   unitId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  unitText?: string;
 
   @IsOptional()
   @IsString()

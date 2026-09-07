@@ -35,6 +35,10 @@ export class IngredientEntity {
   @Column({ length: 20, default: 'PENDING' })
   status: IngredientStatus;
 
+  /** Quick-pick pantry staples (salt, sugar, fish sauce, …). */
+  @Column({ name: 'is_staple', type: 'boolean', default: false })
+  isStaple: boolean;
+
   @Column({ name: 'created_by_user_id', type: 'uuid', nullable: true })
   createdByUserId?: string | null;
 

@@ -45,6 +45,7 @@ export interface CatalogIngredient {
   nameEn?: string
   slug: string
   status: string
+  isStaple?: boolean
   imageAssetId?: string
   imageUrl?: string
 }
@@ -65,6 +66,7 @@ export interface RecipeIngredientView {
   imageUrl?: string
   quantityMin?: number
   quantityMax?: number
+  unitText?: string
   unit?: Unit
   preparationNote?: string
   isOptional: boolean
@@ -116,6 +118,7 @@ export interface RecipeVersionView {
   status: string
   title: string
   summary: string
+  coverAssetId?: string
   coverUrl?: string
   servings: number
   prepTimeMinutes: number
@@ -161,9 +164,10 @@ export interface RecipeEditor {
 export interface DraftIngredientLine {
   ingredientId?: string
   customName?: string
-  quantityMin?: number
-  quantityMax?: number
+  quantityMin?: number | null
+  quantityMax?: number | null
   unitId?: string
+  unitText?: string
   preparationNote?: string
   isOptional?: boolean
 }
@@ -191,7 +195,19 @@ export interface UpdateDraftPayload {
   prepTimeMinutes?: number
   cookTimeMinutes?: number
   difficulty?: Difficulty
-  ingredientGroups?: DraftIngredientGroup[]
+  ingredientGroups?: Array<{
+    name: string
+    ingredients: Array<{
+      ingredientId?: string
+      customName?: string
+      quantityMin?: number | null
+      quantityMax?: number | null
+      unitId?: string
+      unitText?: string
+      preparationNote?: string
+      isOptional?: boolean
+    }>
+  }>
   steps?: DraftStep[]
 }
 

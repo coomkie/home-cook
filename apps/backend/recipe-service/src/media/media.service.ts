@@ -2,21 +2,14 @@ import {
   BadRequestException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
   OnModuleInit,
 } from '@nestjs/common';
 import { type ConfigType } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import {
-  CreateBucketCommand,
-  GetObjectCommand,
-  HeadBucketCommand,
-  HeadObjectCommand,
-  PutBucketCorsCommand,
-  PutObjectCommand,
-  S3Client,
-} from '@aws-sdk/client-s3';import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { randomUUID } from 'crypto';
+import { v2 as cloudinary, type UploadApiResponse } from 'cloudinary';
+import { createHash, randomUUID } from 'crypto';
 import { Repository } from 'typeorm';
 import { appEnv } from '../app.env';
 import { MediaAssetEntity } from './media-asset.entity';
@@ -32,73 +25,51 @@ const ALLOWED_MIME: Record<string, 'IMAGE' | 'VIDEO'> = {
 
 @Injectable()
 export class MediaService implements OnModuleInit {
-  private readonly s3: S3Client;
-  private readonly publicS3: S3Client;
-  private readonly bucket: string;
+  private readonly logger = new Logger(MediaService.name);
+  private configured = false;
 
   constructor(
     @InjectRepository(MediaAssetEntity)
     private readonly mediaRepo: Repository<MediaAssetEntity>,
     @Inject(appEnv.KEY) private readonly env: ConfigType<typeof appEnv>,
-  ) {
-    this.bucket = env.minioBucket;
-    const base = {
-      region: 'us-east-1',
-      credentials: {
-        accessKeyId: env.minioAccessKey,
-        secretAccessKey: env.minioSecretKey,
-      },
-      forcePathStyle: true,
-    };
-    this.s3 = new S3Client({
-      ...base,
-      endpoint: `${env.minioUseSsl ? 'https' : 'http'}://${env.minioEndpoint}:${env.minioPort}`,
+  ) {}
+
+  onModuleInit(): void {
+    const { cloudinaryCloudName, cloudinaryApiKey, cloudinaryApiSecret } =
+      this.env;
+    if (!cloudinaryCloudName || !cloudinaryApiKey || !cloudinaryApiSecret) {
+      this.logger.warn(
+        'Cloudinary env missing (CLOUDINARY_CLOUD_NAME / API_KEY / API_SECRET) — uploads will fail',
+      );
+      return;
+    }
+    cloudinary.config({
+      cloud_name: cloudinaryCloudName,
+      api_key: cloudinaryApiKey,
+      api_secret: cloudinaryApiSecret,
+      secure: true,
     });
-    this.publicS3 = new S3Client({
-      ...base,
-      endpoint: `${env.minioUseSsl ? 'https' : 'http'}://${env.minioPublicEndpoint}:${env.minioPublicPort}`,
-    });
+    this.configured = true;
+    this.logger.log(
+      `Cloudinary ready (cloud=${cloudinaryCloudName}, folder=${this.env.cloudinaryFolder})`,
+    );
   }
 
-  async onModuleInit(): Promise<void> {
-    try {
-      await this.s3.send(new HeadBucketCommand({ Bucket: this.bucket }));
-    } catch {
-      try {
-        await this.s3.send(new CreateBucketCommand({ Bucket: this.bucket }));
-      } catch {
-        /* bucket may already exist from race */
-      }
+  private assertConfigured() {
+    if (!this.configured) {
+      throw new BadRequestException('errors.mediaIncomplete');
     }
-    try {
-      await this.s3.send(
-        new PutBucketCorsCommand({
-          Bucket: this.bucket,
-          CORSConfiguration: {
-            CORSRules: [
-              {
-                AllowedHeaders: ['*'],
-                AllowedMethods: ['GET', 'PUT', 'POST', 'HEAD'],
-                AllowedOrigins: [
-                  'http://localhost:5173',
-                  'http://127.0.0.1:5173',
-                ],
-                ExposeHeaders: ['ETag'],
-                MaxAgeSeconds: 3600,
-              },
-            ],
-          },
-        }),
-      );
-    } catch {
-      /* older minio / already set */
-    }
+  }
+
+  private resourceType(mediaType: 'IMAGE' | 'VIDEO'): 'image' | 'video' {
+    return mediaType === 'VIDEO' ? 'video' : 'image';
   }
 
   async initiate(
     userId: string,
     input: { mimeType: string; filename?: string; byteSize?: number },
   ) {
+    this.assertConfigured();
     const mediaType = ALLOWED_MIME[input.mimeType];
     if (!mediaType) {
       throw new BadRequestException('errors.mediaTypeNotAllowed');
@@ -119,31 +90,44 @@ export class MediaService implements OnModuleInit {
       }),
     );
 
-    const ext = input.filename?.split('.').pop()?.toLowerCase() || 'bin';
-    const objectKey = `uploads/${userId}/${asset.id}.${ext}`;
-    asset.objectKey = objectKey;
+    const folder = this.env.cloudinaryFolder.replace(/^\/+|\/+$/g, '');
+    const publicIdLeaf = `${userId}/${asset.id}`;
+    const fullPublicId = `${folder}/${publicIdLeaf}`;
+    asset.objectKey = fullPublicId;
     await this.mediaRepo.save(asset);
 
-    const uploadUrl = await getSignedUrl(
-      this.publicS3,
-      new PutObjectCommand({
-        Bucket: this.bucket,
-        Key: objectKey,
-        ContentType: input.mimeType,
-      }),
-      { expiresIn: 60 * 15 },
+    const timestamp = Math.round(Date.now() / 1000);
+    const paramsToSign: Record<string, string | number> = {
+      timestamp,
+      folder,
+      public_id: publicIdLeaf,
+    };
+    const signature = cloudinary.utils.api_sign_request(
+      paramsToSign,
+      this.env.cloudinaryApiSecret,
     );
+
+    const resource = this.resourceType(mediaType);
+    const uploadUrl = `https://api.cloudinary.com/v1_1/${this.env.cloudinaryCloudName}/${resource}/upload`;
 
     return {
       assetId: asset.id,
       uploadUrl,
-      objectKey,
+      method: 'POST' as const,
+      objectKey: fullPublicId,
       mediaType,
-      headers: { 'Content-Type': input.mimeType },
+      fields: {
+        api_key: this.env.cloudinaryApiKey,
+        timestamp: String(timestamp),
+        signature,
+        folder,
+        public_id: publicIdLeaf,
+      },
     };
   }
 
   async complete(userId: string, assetId: string) {
+    this.assertConfigured();
     const asset = await this.mediaRepo.findOne({ where: { id: assetId } });
     if (!asset || asset.ownerUserId !== userId) {
       throw new NotFoundException({
@@ -155,23 +139,23 @@ export class MediaService implements OnModuleInit {
       throw new BadRequestException('errors.mediaIncomplete');
     }
 
+    const resource = this.resourceType(asset.mediaType);
     try {
-      await this.s3.send(
-        new HeadObjectCommand({
-          Bucket: this.bucket,
-          Key: asset.objectKey,
-        }),
-      );
+      await cloudinary.api.resource(asset.objectKey, {
+        resource_type: resource,
+      });
     } catch {
       throw new BadRequestException('errors.mediaUploadMissing');
     }
 
     asset.status = 'READY';
     await this.mediaRepo.save(asset);
-    return this.toDto(asset);
+    return this.toDtoWithUrl(asset);
   }
 
-  async getSignedGetUrl(assetId: string): Promise<{ url: string; expiresIn: number }> {
+  async getSignedGetUrl(
+    assetId: string,
+  ): Promise<{ url: string; expiresIn: number }> {
     const asset = await this.mediaRepo.findOne({ where: { id: assetId } });
     if (!asset || asset.status !== 'READY' || !asset.objectKey) {
       throw new NotFoundException({
@@ -179,19 +163,18 @@ export class MediaService implements OnModuleInit {
         args: { id: assetId },
       });
     }
-    const expiresIn = 60 * 60;
-    const url = await getSignedUrl(
-      this.publicS3,
-      new GetObjectCommand({
-        Bucket: this.bucket,
-        Key: asset.objectKey,
-      }),
-      { expiresIn },
-    );
-    return { url, expiresIn };
+    const url = cloudinary.url(asset.objectKey, {
+      secure: true,
+      resource_type: this.resourceType(asset.mediaType),
+      // Public delivery URL (no expiry); keep shape for FE compatibility.
+    });
+    return { url, expiresIn: 60 * 60 * 24 * 365 };
   }
 
-  async requireReadyOwned(assetId: string, userId?: string): Promise<MediaAssetEntity> {
+  async requireReadyOwned(
+    assetId: string,
+    userId?: string,
+  ): Promise<MediaAssetEntity> {
     const asset = await this.mediaRepo.findOne({ where: { id: assetId } });
     if (!asset || asset.status !== 'READY') {
       throw new BadRequestException('errors.mediaNotReady');
@@ -208,29 +191,69 @@ export class MediaService implements OnModuleInit {
     });
   }
 
-  /** Dev helper: put a tiny placeholder PNG for seed ingredients. */
-  async seedPlaceholderImage(ownerUserId: string, slug: string): Promise<string> {
+  /** Delete assets from Cloudinary + mark DB rows DELETED. */
+  async destroyMany(assetIds: string[]): Promise<void> {
+    const unique = [...new Set(assetIds.filter(Boolean))];
+    if (!unique.length) return;
+
+    for (const id of unique) {
+      const asset = await this.mediaRepo.findOne({ where: { id } });
+      if (!asset) continue;
+
+      if (this.configured && asset.objectKey) {
+        try {
+          await cloudinary.uploader.destroy(asset.objectKey, {
+            resource_type: this.resourceType(asset.mediaType),
+            invalidate: true,
+          });
+        } catch (e) {
+          this.logger.warn(
+            `Cloudinary destroy failed for ${asset.objectKey}: ${
+              e instanceof Error ? e.message : e
+            }`,
+          );
+        }
+      }
+
+      asset.status = 'DELETED';
+      asset.objectKey = null;
+      await this.mediaRepo.save(asset);
+    }
+  }
+
+  /** Dev helper — uploads a tiny PNG to Cloudinary when configured. */
+  async seedPlaceholderImage(
+    ownerUserId: string,
+    slug: string,
+  ): Promise<string> {
     const id = randomUUID();
-    const objectKey = `seed/${slug}.png`;
-    // 1x1 PNG
     const png = Buffer.from(
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
       'base64',
     );
-    await this.s3.send(
-      new PutObjectCommand({
-        Bucket: this.bucket,
-        Key: objectKey,
-        Body: png,
-        ContentType: 'image/png',
-      }),
-    );
+
+    let objectKey: string | null = null;
+    if (this.configured) {
+      const folder = this.env.cloudinaryFolder.replace(/^\/+|\/+$/g, '');
+      const publicIdLeaf = `seed/${slug}-${createHash('sha1').update(slug).digest('hex').slice(0, 8)}`;
+      const uploaded: UploadApiResponse = await cloudinary.uploader.upload(
+        `data:image/png;base64,${png.toString('base64')}`,
+        {
+          folder,
+          public_id: publicIdLeaf,
+          overwrite: true,
+          resource_type: 'image',
+        },
+      );
+      objectKey = uploaded.public_id;
+    }
+
     const asset = await this.mediaRepo.save(
       this.mediaRepo.create({
         id,
         ownerUserId,
         mediaType: 'IMAGE',
-        status: 'READY',
+        status: objectKey ? 'READY' : 'FAILED',
         objectKey,
         mimeType: 'image/png',
         byteSize: String(png.length),
@@ -248,5 +271,16 @@ export class MediaService implements OnModuleInit {
       mimeType: asset.mimeType ?? undefined,
       originalFilename: asset.originalFilename ?? undefined,
     };
+  }
+
+  async toDtoWithUrl(asset: MediaAssetEntity) {
+    const base = this.toDto(asset);
+    if (asset.status !== 'READY' || !asset.objectKey) return base;
+    try {
+      const signed = await this.getSignedGetUrl(asset.id);
+      return { ...base, url: signed.url };
+    } catch {
+      return base;
+    }
   }
 }

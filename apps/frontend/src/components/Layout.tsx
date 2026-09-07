@@ -47,9 +47,6 @@ export function Layout() {
               <NavLink to="/login" className="btn ghost compact">
                 {t('nav.login')}
               </NavLink>
-              <NavLink to="/register" className="btn primary compact">
-                {t('nav.register')}
-              </NavLink>
             </>
           )}
         </div>

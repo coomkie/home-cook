@@ -1,7 +1,9 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
   Param,
   Patch,
   Post,
@@ -60,6 +62,13 @@ export class RecipesController {
   @UseGuards(JwtAuthGuard)
   publish(@CurrentUser() user: RequestUser, @Param('id') id: string) {
     return this.recipes.publish(id, user.userId);
+  }
+
+  @Delete(':id')
+  @HttpCode(204)
+  @UseGuards(JwtAuthGuard)
+  deleteDraft(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    return this.recipes.deleteDraft(id, user.userId);
   }
 
   @Get(':id/preview')

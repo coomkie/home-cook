@@ -48,6 +48,11 @@ export class IngredientsController {
     return this.ingredients.search(q, status === 'PENDING' ? 'PENDING' : 'APPROVED');
   }
 
+  @Get('ingredients/staples')
+  listStaples() {
+    return this.ingredients.listStaples();
+  }
+
   @Post('ingredients')
   @UseGuards(JwtAuthGuard)
   propose(@CurrentUser() user: RequestUser, @Body() dto: ProposeIngredientDto) {

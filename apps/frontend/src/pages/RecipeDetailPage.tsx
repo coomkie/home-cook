@@ -2,13 +2,16 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api } from '../api/client'
+import { useAuth } from '../auth/AuthContext'
 import { RecipeDetailSkeleton } from '../components/Skeleton'
 import { SubRecipeSheet } from '../components/SubRecipeSheet'
 import { useApiMessage, useI18n } from '../i18n/I18nContext'
+import { formatIngredientAmount } from '../lib/ingredient-amount'
 import type { RecipeDetail } from '../types'
 
 export function RecipeDetailPage() {
   const { id } = useParams<{ id: string }>()
+  const { user } = useAuth()
   const { t } = useI18n()
   const apiMessage = useApiMessage()
   const [recipe, setRecipe] = useState<RecipeDetail | null>(null)
@@ -42,12 +45,20 @@ export function RecipeDetailPage() {
   if (!recipe) return <RecipeDetailSkeleton />
 
   const v = recipe.version
+  const isOwner = !!user && user.id === recipe.authorId
 
   return (
     <article className="detail">
-      <Link to="/" className="back">
-        {t('common.backRecipes')}
-      </Link>
+      <div className="detail__nav">
+        <Link to="/" className="back">
+          {t('common.backRecipes')}
+        </Link>
+        {isOwner && (
+          <Link to={`/studio/recipes/${recipe.id}`} className="btn ghost compact">
+            {t('studio.editRecipe')}
+          </Link>
+        )}
+      </div>
       <div className="detail__hero">
         {v.coverUrl && (
           <img className="detail__cover" src={v.coverUrl} alt="" />
@@ -77,11 +88,7 @@ export function RecipeDetailPage() {
                   {ing.name}
                   {ing.preparationNote ? ` (${ing.preparationNote})` : ''}
                 </span>
-                <span>
-                  {ing.quantityMin ?? ''}
-                  {ing.quantityMax != null ? `–${ing.quantityMax}` : ''}{' '}
-                  {ing.unit?.symbol ?? ''}
-                </span>
+                <span>{formatIngredientAmount(ing)}</span>
               </li>
             ))}
           </ul>

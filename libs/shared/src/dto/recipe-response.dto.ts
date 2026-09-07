@@ -21,6 +21,7 @@ export class IngredientCatalogDto {
   nameEn?: string;
   slug: string;
   status: string;
+  isStaple?: boolean;
   imageAssetId?: string;
   imageUrl?: string;
 }
@@ -33,6 +34,7 @@ export class RecipeIngredientViewDto {
   imageUrl?: string;
   quantityMin?: number;
   quantityMax?: number;
+  unitText?: string;
   unit?: UnitDto;
   preparationNote?: string;
   isOptional: boolean;
@@ -84,6 +86,7 @@ export class RecipeVersionViewDto {
   status: string;
   title: string;
   summary: string;
+  coverAssetId?: string;
   coverUrl?: string;
   servings: number;
   prepTimeMinutes: number;

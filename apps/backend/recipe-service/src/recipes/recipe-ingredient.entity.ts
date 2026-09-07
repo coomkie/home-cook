@@ -62,6 +62,10 @@ export class RecipeIngredientEntity {
   @JoinColumn({ name: 'unit_id' })
   unit?: UnitEntity | null;
 
+  /** Free-text unit label (e.g. "muỗng canh", "củ", "g"). Preferred over unitId. */
+  @Column({ name: 'unit_text', type: 'varchar', length: 80, nullable: true })
+  unitText?: string | null;
+
   @Column({
     name: 'preparation_note',
     type: 'varchar',

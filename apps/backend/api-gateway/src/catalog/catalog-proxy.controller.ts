@@ -55,6 +55,18 @@ export class CatalogProxyController {
     );
   }
 
+  @Get('ingredients/staples')
+  staples(@Headers('accept-language') acceptLanguage?: string) {
+    return this.proxy.forward(
+      this.recipeServiceUrl,
+      'GET',
+      '/ingredients/staples',
+      undefined,
+      undefined,
+      this.fwd(undefined, acceptLanguage),
+    );
+  }
+
   @Post('ingredients')
   propose(
     @Body() body: unknown,
