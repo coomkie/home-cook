@@ -31,6 +31,10 @@ export class MediaAssetEntity {
   @Column({ name: 'object_key', type: 'varchar', length: 500, nullable: true })
   objectKey?: string | null;
 
+  /** Cached Cloudinary secure_url (avoids reconstructing broken delivery URLs). */
+  @Column({ name: 'delivery_url', type: 'varchar', length: 1000, nullable: true })
+  deliveryUrl?: string | null;
+
   @Column({ name: 'mime_type', type: 'varchar', length: 120, nullable: true })
   mimeType?: string | null;
 

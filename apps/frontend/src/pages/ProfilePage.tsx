@@ -5,12 +5,12 @@ import { useAuth } from '../auth/AuthContext'
 import { api } from '../api/client'
 import { ProfileSkeleton } from '../components/Skeleton'
 import { ButtonLabel, Spinner } from '../components/Spinner'
-import { useApiMessage, useI18n } from '../i18n/I18nContext'
+import { useApiErrorToast, useI18n } from '../i18n/I18nContext'
 
 export function ProfilePage() {
   const { user, loading, refreshProfile, logout } = useAuth()
   const { t } = useI18n()
-  const apiMessage = useApiMessage()
+  const toastApiError = useApiErrorToast()
   const navigate = useNavigate()
   const [displayName, setDisplayName] = useState('')
   const [bio, setBio] = useState('')
@@ -37,12 +37,7 @@ export function ProfilePage() {
       await refreshProfile()
       toast.success(t('profile.updateSuccess'))
     } catch (err) {
-      toast.error(
-        apiMessage(
-          err instanceof Error ? err.message : undefined,
-          'profile.updateFailed',
-        ),
-      )
+      toastApiError(err, 'profile.updateFailed')
     } finally {
       setSaving(false)
     }

@@ -13,4 +13,7 @@ export const appEnv = registerAs('app', () => ({
     process.env.JWT_REFRESH_SECRET ?? 'homecook-dev-refresh-secret-change-me',
   jwtAccessExpiresIn: process.env.JWT_ACCESS_EXPIRES_IN ?? '15m',
   jwtRefreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN ?? '7d',
+  seedAdminEmail: process.env.SEED_ADMIN_EMAIL ?? 'admin@homecook.local',
+  seedAdminPassword: process.env.SEED_ADMIN_PASSWORD ?? 'Admin123!',
+  seedAdminName: process.env.SEED_ADMIN_NAME ?? 'Home-cook Admin',
 }));

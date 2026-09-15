@@ -131,7 +131,13 @@ export function RecipeDetailPage() {
                 <div className="step-media">
                   {step.media.map((m) =>
                     m.mediaType === 'VIDEO' && m.url ? (
-                      <video key={m.mediaAssetId} src={m.url} controls />
+                      <video
+                        key={m.mediaAssetId}
+                        src={m.url}
+                        controls
+                        playsInline
+                        preload="metadata"
+                      />
                     ) : m.url ? (
                       <img key={m.mediaAssetId} src={m.url} alt={m.caption ?? ''} />
                     ) : null,

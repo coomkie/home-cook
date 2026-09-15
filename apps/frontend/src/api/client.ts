@@ -18,6 +18,19 @@ const ACCESS_KEY = 'homecook_access_token'
 const REFRESH_KEY = 'homecook_refresh_token'
 const LOCALE_KEY = 'homecook_locale'
 
+/** Dispatched when refresh fails — AuthContext clears the logged-in UI. */
+export const SESSION_EXPIRED_EVENT = 'homecook:session-expired'
+
+export class ApiError extends Error {
+  readonly status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+  }
+}
+
 export function getAccessToken(): string | null {
   return localStorage.getItem(ACCESS_KEY)
 }
@@ -29,11 +42,53 @@ export function getRefreshToken(): string | null {
 export function saveTokens(tokens: AuthTokens): void {
   localStorage.setItem(ACCESS_KEY, tokens.accessToken)
   localStorage.setItem(REFRESH_KEY, tokens.refreshToken)
+  sessionExpiredNotified = false
 }
 
 export function clearTokens(): void {
   localStorage.removeItem(ACCESS_KEY)
   localStorage.removeItem(REFRESH_KEY)
+}
+
+let refreshInFlight: Promise<boolean> | null = null
+let sessionExpiredNotified = false
+
+function notifySessionExpired() {
+  if (sessionExpiredNotified) return
+  sessionExpiredNotified = true
+  clearTokens()
+  window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT))
+}
+
+/** Single-flight refresh so parallel 401s share one /auth/refresh. */
+async function tryRefreshSession(): Promise<boolean> {
+  if (refreshInFlight) return refreshInFlight
+
+  refreshInFlight = (async () => {
+    const refresh = getRefreshToken()
+    if (!refresh) return false
+    try {
+      const res = await fetch(`${BASE}/auth/refresh`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept-Language': acceptLanguage(),
+        },
+        body: JSON.stringify({ refreshToken: refresh }),
+      })
+      if (!res.ok) return false
+      const tokens = (await res.json()) as AuthTokens
+      if (!tokens?.accessToken || !tokens?.refreshToken) return false
+      saveTokens(tokens)
+      return true
+    } catch {
+      return false
+    }
+  })().finally(() => {
+    refreshInFlight = null
+  })
+
+  return refreshInFlight
 }
 
 function acceptLanguage(): string {
@@ -50,6 +105,7 @@ async function request<T>(
   path: string,
   init?: RequestInit,
   auth = false,
+  retried = false,
 ): Promise<T> {
   const delayMs = resolveDevDelayMs(path)
   if (delayMs > 0) await sleep(delayMs)
@@ -67,6 +123,15 @@ async function request<T>(
 
   const res = await fetch(`${BASE}${path}`, { ...init, headers })
 
+  if (res.status === 401 && auth && !retried) {
+    const refreshed = await tryRefreshSession()
+    if (refreshed) {
+      return request<T>(path, init, auth, true)
+    }
+    notifySessionExpired()
+    throw new ApiError('errors.sessionExpired', 401)
+  }
+
   if (!res.ok) {
     let message = `HTTP ${res.status}`
     try {
@@ -76,7 +141,11 @@ async function request<T>(
     } catch {
       /* ignore */
     }
-    throw new Error(message)
+    if (res.status === 401 && auth) {
+      notifySessionExpired()
+      throw new ApiError('errors.sessionExpired', 401)
+    }
+    throw new ApiError(message, res.status)
   }
 
   if (res.status === 204) return undefined as T
@@ -84,6 +153,24 @@ async function request<T>(
 }
 
 export async function uploadFile(file: File): Promise<MediaAssetRef> {
+  const mimeType =
+    file.type ||
+    (/\.(jpe?g)$/i.test(file.name)
+      ? 'image/jpeg'
+      : /\.png$/i.test(file.name)
+        ? 'image/png'
+        : /\.webp$/i.test(file.name)
+          ? 'image/webp'
+          : /\.gif$/i.test(file.name)
+            ? 'image/gif'
+            : /\.webm$/i.test(file.name)
+              ? 'video/webm'
+              : /\.(mp4|m4v)$/i.test(file.name)
+                ? 'video/mp4'
+                : /\.mov$/i.test(file.name)
+                  ? 'video/quicktime'
+                  : 'application/octet-stream')
+
   const initiated = await request<{
     assetId: string
     uploadUrl: string
@@ -95,13 +182,16 @@ export async function uploadFile(file: File): Promise<MediaAssetRef> {
     {
       method: 'POST',
       body: JSON.stringify({
-        mimeType: file.type || 'application/octet-stream',
+        mimeType,
         filename: file.name,
         byteSize: file.size,
       }),
     },
     true,
   )
+
+  let publicId: string | undefined
+  let secureUrl: string | undefined
 
   if (initiated.method === 'POST' && initiated.fields) {
     const form = new FormData()
@@ -121,6 +211,16 @@ export async function uploadFile(file: File): Promise<MediaAssetRef> {
           : `Upload failed HTTP ${uploaded.status}`,
       )
     }
+    try {
+      const cloud = (await uploaded.json()) as {
+        public_id?: string
+        secure_url?: string
+      }
+      publicId = cloud.public_id
+      secureUrl = cloud.secure_url
+    } catch {
+      /* response may be empty in some edge cases */
+    }
   } else {
     const put = await fetch(initiated.uploadUrl, {
       method: 'PUT',
@@ -132,7 +232,13 @@ export async function uploadFile(file: File): Promise<MediaAssetRef> {
 
   return request<MediaAssetRef>(
     `/media/uploads/${initiated.assetId}/complete`,
-    { method: 'POST' },
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        ...(publicId ? { publicId } : {}),
+        ...(secureUrl ? { secureUrl } : {}),
+      }),
+    },
     true,
   )
 }
@@ -179,6 +285,16 @@ export const api = {
     imageAssetId?: string
   }) =>
     request<CatalogIngredient>('/ingredients', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }, true),
+  createCatalogIngredient: (payload: {
+    name: string
+    nameEn?: string
+    imageAssetId?: string
+    isStaple?: boolean
+  }) =>
+    request<CatalogIngredient>('/ingredients/catalog', {
       method: 'POST',
       body: JSON.stringify(payload),
     }, true),

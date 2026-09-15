@@ -7,7 +7,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
+import { IsBoolean, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
 import {
   CurrentUser,
   Roles,
@@ -29,6 +29,24 @@ class ProposeIngredientDto {
   @IsOptional()
   @IsUUID()
   imageAssetId?: string;
+}
+
+class CreateCatalogIngredientDto {
+  @IsString()
+  @MinLength(2)
+  name: string;
+
+  @IsOptional()
+  @IsString()
+  nameEn?: string;
+
+  @IsOptional()
+  @IsUUID()
+  imageAssetId?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isStaple?: boolean;
 }
 
 @Controller()
@@ -57,6 +75,17 @@ export class IngredientsController {
   @UseGuards(JwtAuthGuard)
   propose(@CurrentUser() user: RequestUser, @Body() dto: ProposeIngredientDto) {
     return this.ingredients.propose(user.userId, dto);
+  }
+
+  /** Admin/moderator: add directly to approved catalog (with optional image). */
+  @Post('ingredients/catalog')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('MODERATOR', 'ADMIN')
+  createCatalog(
+    @CurrentUser() user: RequestUser,
+    @Body() dto: CreateCatalogIngredientDto,
+  ) {
+    return this.ingredients.createCatalog(user.userId, dto);
   }
 
   @Get('ingredients/moderation')

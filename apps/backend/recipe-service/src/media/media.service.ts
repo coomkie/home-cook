@@ -16,11 +16,18 @@ import { MediaAssetEntity } from './media-asset.entity';
 
 const ALLOWED_MIME: Record<string, 'IMAGE' | 'VIDEO'> = {
   'image/jpeg': 'IMAGE',
+  'image/jpg': 'IMAGE',
   'image/png': 'IMAGE',
   'image/webp': 'IMAGE',
   'image/gif': 'IMAGE',
   'video/mp4': 'VIDEO',
   'video/webm': 'VIDEO',
+  'video/quicktime': 'VIDEO',
+};
+
+export type CompleteUploadInput = {
+  publicId?: string;
+  secureUrl?: string;
 };
 
 @Injectable()
@@ -65,6 +72,31 @@ export class MediaService implements OnModuleInit {
     return mediaType === 'VIDEO' ? 'video' : 'image';
   }
 
+  /** True for pre-Cloudinary MinIO keys that cannot be served via res.cloudinary.com. */
+  private isLegacyObjectKey(objectKey: string): boolean {
+    if (objectKey.startsWith('uploads/')) return true;
+    // Old object stores often baked the extension into the key.
+    return /\.(jpe?g|png|gif|webp|mp4|webm|mov)$/i.test(objectKey);
+  }
+
+  /** Build or reuse a public delivery URL for a READY asset (no DB I/O). */
+  deliveryUrlFor(asset: MediaAssetEntity): string | undefined {
+    if (asset.status !== 'READY') return undefined;
+    if (asset.deliveryUrl) return asset.deliveryUrl;
+    if (!asset.objectKey || !this.configured) return undefined;
+    if (this.isLegacyObjectKey(asset.objectKey)) {
+      this.logger.warn(
+        `Skipping delivery URL for legacy objectKey=${asset.objectKey}`,
+      );
+      return undefined;
+    }
+    return cloudinary.url(asset.objectKey, {
+      secure: true,
+      resource_type: this.resourceType(asset.mediaType),
+      type: 'upload',
+    });
+  }
+
   async initiate(
     userId: string,
     input: { mimeType: string; filename?: string; byteSize?: number },
@@ -87,11 +119,13 @@ export class MediaService implements OnModuleInit {
         originalFilename: input.filename ?? null,
         byteSize: input.byteSize != null ? String(input.byteSize) : null,
         objectKey: null,
+        deliveryUrl: null,
       }),
     );
 
     const folder = this.env.cloudinaryFolder.replace(/^\/+|\/+$/g, '');
-    const publicIdLeaf = `${userId}/${asset.id}`;
+    // Flat public_id leaf — nested UUID paths are a common Cloudinary footgun.
+    const publicIdLeaf = `${userId}_${asset.id}`;
     const fullPublicId = `${folder}/${publicIdLeaf}`;
     asset.objectKey = fullPublicId;
     await this.mediaRepo.save(asset);
@@ -126,7 +160,11 @@ export class MediaService implements OnModuleInit {
     };
   }
 
-  async complete(userId: string, assetId: string) {
+  async complete(
+    userId: string,
+    assetId: string,
+    input: CompleteUploadInput = {},
+  ) {
     this.assertConfigured();
     const asset = await this.mediaRepo.findOne({ where: { id: assetId } });
     if (!asset || asset.ownerUserId !== userId) {
@@ -135,19 +173,46 @@ export class MediaService implements OnModuleInit {
         args: { id: assetId },
       });
     }
-    if (!asset.objectKey) {
+    if (!asset.objectKey && !input.publicId) {
       throw new BadRequestException('errors.mediaIncomplete');
     }
 
     const resource = this.resourceType(asset.mediaType);
-    try {
-      await cloudinary.api.resource(asset.objectKey, {
-        resource_type: resource,
-      });
-    } catch {
+    const candidates = [
+      input.publicId,
+      asset.objectKey,
+    ].filter((v): v is string => !!v);
+
+    let resolved: { public_id: string; secure_url: string } | null = null;
+    for (const publicId of candidates) {
+      try {
+        const info = await cloudinary.api.resource(publicId, {
+          resource_type: resource,
+        });
+        resolved = {
+          public_id: info.public_id as string,
+          secure_url: info.secure_url as string,
+        };
+        break;
+      } catch {
+        /* try next */
+      }
+    }
+
+    if (!resolved && input.secureUrl && input.publicId) {
+      // Upload response is authoritative when Admin API lags briefly.
+      resolved = {
+        public_id: input.publicId,
+        secure_url: input.secureUrl,
+      };
+    }
+
+    if (!resolved) {
       throw new BadRequestException('errors.mediaUploadMissing');
     }
 
+    asset.objectKey = resolved.public_id;
+    asset.deliveryUrl = resolved.secure_url || input.secureUrl || null;
     asset.status = 'READY';
     await this.mediaRepo.save(asset);
     return this.toDtoWithUrl(asset);
@@ -157,17 +222,19 @@ export class MediaService implements OnModuleInit {
     assetId: string,
   ): Promise<{ url: string; expiresIn: number }> {
     const asset = await this.mediaRepo.findOne({ where: { id: assetId } });
-    if (!asset || asset.status !== 'READY' || !asset.objectKey) {
+    if (!asset || asset.status !== 'READY') {
       throw new NotFoundException({
         message: 'errors.mediaNotFound',
         args: { id: assetId },
       });
     }
-    const url = cloudinary.url(asset.objectKey, {
-      secure: true,
-      resource_type: this.resourceType(asset.mediaType),
-      // Public delivery URL (no expiry); keep shape for FE compatibility.
-    });
+    const url = this.deliveryUrlFor(asset);
+    if (!url) {
+      throw new NotFoundException({
+        message: 'errors.mediaNotFound',
+        args: { id: assetId },
+      });
+    }
     return { url, expiresIn: 60 * 60 * 24 * 365 };
   }
 
@@ -200,7 +267,7 @@ export class MediaService implements OnModuleInit {
       const asset = await this.mediaRepo.findOne({ where: { id } });
       if (!asset) continue;
 
-      if (this.configured && asset.objectKey) {
+      if (this.configured && asset.objectKey && !this.isLegacyObjectKey(asset.objectKey)) {
         try {
           await cloudinary.uploader.destroy(asset.objectKey, {
             resource_type: this.resourceType(asset.mediaType),
@@ -217,6 +284,7 @@ export class MediaService implements OnModuleInit {
 
       asset.status = 'DELETED';
       asset.objectKey = null;
+      asset.deliveryUrl = null;
       await this.mediaRepo.save(asset);
     }
   }
@@ -233,6 +301,7 @@ export class MediaService implements OnModuleInit {
     );
 
     let objectKey: string | null = null;
+    let deliveryUrl: string | null = null;
     if (this.configured) {
       const folder = this.env.cloudinaryFolder.replace(/^\/+|\/+$/g, '');
       const publicIdLeaf = `seed/${slug}-${createHash('sha1').update(slug).digest('hex').slice(0, 8)}`;
@@ -246,6 +315,7 @@ export class MediaService implements OnModuleInit {
         },
       );
       objectKey = uploaded.public_id;
+      deliveryUrl = uploaded.secure_url ?? null;
     }
 
     const asset = await this.mediaRepo.save(
@@ -255,6 +325,7 @@ export class MediaService implements OnModuleInit {
         mediaType: 'IMAGE',
         status: objectKey ? 'READY' : 'FAILED',
         objectKey,
+        deliveryUrl,
         mimeType: 'image/png',
         byteSize: String(png.length),
         originalFilename: `${slug}.png`,
@@ -273,14 +344,9 @@ export class MediaService implements OnModuleInit {
     };
   }
 
-  async toDtoWithUrl(asset: MediaAssetEntity) {
+  toDtoWithUrl(asset: MediaAssetEntity) {
     const base = this.toDto(asset);
-    if (asset.status !== 'READY' || !asset.objectKey) return base;
-    try {
-      const signed = await this.getSignedGetUrl(asset.id);
-      return { ...base, url: signed.url };
-    } catch {
-      return base;
-    }
+    const url = this.deliveryUrlFor(asset);
+    return url ? { ...base, url } : base;
   }
 }

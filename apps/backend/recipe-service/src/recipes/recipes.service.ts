@@ -765,7 +765,9 @@ export class RecipesService {
     version: RecipeVersionEntity,
   ): Promise<RecipeVersionViewDto> {
     let coverUrl: string | undefined;
-    if (version.coverAssetId) {
+    if (version.coverAsset) {
+      coverUrl = this.media.deliveryUrlFor(version.coverAsset);
+    } else if (version.coverAssetId) {
       try {
         coverUrl = (await this.media.getSignedGetUrl(version.coverAssetId)).url;
       } catch {
@@ -825,24 +827,25 @@ export class RecipesService {
 
     const steps = await Promise.all(
       (version.steps ?? []).map(async (s) => {
-        const media = await Promise.all(
-          (s.media ?? []).map(async (m) => {
-            let url: string | undefined;
-            try {
-              url = (await this.media.getSignedGetUrl(m.mediaAssetId)).url;
-            } catch {
-              /* ignore */
-            }
-            return {
-              id: m.id,
-              mediaAssetId: m.mediaAssetId,
-              url,
-              mediaType: m.mediaAsset?.mediaType,
-              caption: m.caption ?? undefined,
-              position: m.position,
-            };
-          }),
-        );
+        const media = (s.media ?? []).map((m) => ({
+          id: m.id,
+          mediaAssetId: m.mediaAssetId,
+          url:
+            (m.mediaAsset && this.media.deliveryUrlFor(m.mediaAsset)) ||
+            undefined,
+          mediaType: m.mediaAsset?.mediaType,
+          caption: m.caption ?? undefined,
+          position: m.position,
+        }));
+
+        for (const item of media) {
+          if (item.url) continue;
+          try {
+            item.url = (await this.media.getSignedGetUrl(item.mediaAssetId)).url;
+          } catch {
+            /* asset missing / legacy key */
+          }
+        }
 
         let subRecipe;
         if (s.mode === 'SUB_RECIPE' && s.subRecipe?.childVersion) {

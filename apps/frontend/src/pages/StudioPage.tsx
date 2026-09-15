@@ -3,13 +3,13 @@ import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
-import { useApiMessage, useI18n } from '../i18n/I18nContext'
+import { useApiErrorToast, useI18n } from '../i18n/I18nContext'
 import type { RecipeListItem } from '../types'
 
 export function StudioPage() {
   const { user } = useAuth()
   const { t } = useI18n()
-  const apiMessage = useApiMessage()
+  const toastApiError = useApiErrorToast()
   const navigate = useNavigate()
   const [mine, setMine] = useState<RecipeListItem[]>([])
   const [creating, setCreating] = useState(false)
@@ -40,9 +40,7 @@ export function StudioPage() {
       })
       navigate(`/studio/recipes/${editor.id}`)
     } catch (e) {
-      toast.error(
-        apiMessage(e instanceof Error ? e.message : undefined, 'studio.createFailed'),
-      )
+      toastApiError(e, 'studio.createFailed')
     } finally {
       setCreating(false)
     }
@@ -63,9 +61,7 @@ export function StudioPage() {
       setMine((prev) => prev.filter((r) => r.id !== recipe.id))
       toast.success(t('studio.deleted'))
     } catch (e) {
-      toast.error(
-        apiMessage(e instanceof Error ? e.message : undefined, 'studio.deleteFailed'),
-      )
+      toastApiError(e, 'studio.deleteFailed')
     } finally {
       setDeletingId(null)
     }

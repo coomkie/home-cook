@@ -5,7 +5,7 @@ import { api, uploadFile } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { ButtonLabel } from '../components/Spinner'
 import { FormPageSkeleton } from '../components/Skeleton'
-import { useApiMessage, useI18n } from '../i18n/I18nContext'
+import { useApiErrorToast, useI18n } from '../i18n/I18nContext'
 import type {
   CatalogIngredient,
   DraftIngredientGroup,
@@ -66,7 +66,7 @@ export function StudioEditorPage() {
   const { id } = useParams<{ id: string }>()
   const { user, loading: authLoading } = useAuth()
   const { t } = useI18n()
-  const apiMessage = useApiMessage()
+  const toastApiError = useApiErrorToast()
   const navigate = useNavigate()
   const selectedTrayRef = useRef<HTMLDivElement>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -166,6 +166,8 @@ export function StudioEditorPage() {
                 media: s.media.map((m) => ({
                   mediaAssetId: m.mediaAssetId,
                   caption: m.caption,
+                  url: m.url,
+                  mediaType: m.mediaType,
                 })),
                 childRecipeVersionId: s.subRecipe?.versionId,
                 servingMultiplier: s.subRecipe?.servingMultiplier,
@@ -200,6 +202,19 @@ export function StudioEditorPage() {
         })),
       }))
 
+      const stepsPayload = steps.map((s) => ({
+        mode: s.mode,
+        title: s.title,
+        instruction: s.instruction,
+        tip: s.tip,
+        media: (s.media ?? []).map((m) => ({
+          mediaAssetId: m.mediaAssetId,
+          caption: m.caption,
+        })),
+        childRecipeVersionId: s.childRecipeVersionId,
+        servingMultiplier: s.servingMultiplier,
+      }))
+
       if (current === 'basics') {
         return {
           title: title.trim(),
@@ -215,7 +230,7 @@ export function StudioEditorPage() {
         return { ingredientGroups }
       }
       if (current === 'steps') {
-        return { steps }
+        return { steps: stepsPayload }
       }
       return {
         title: title.trim(),
@@ -226,7 +241,7 @@ export function StudioEditorPage() {
         difficulty,
         coverAssetId,
         ingredientGroups,
-        steps,
+        steps: stepsPayload,
       }
     },
     [title, summary, servings, prep, cook, difficulty, coverAssetId, groups, steps],
@@ -246,9 +261,7 @@ export function StudioEditorPage() {
         setStaples(stapleList)
         setUnlocked(Math.max(inferUnlocked(data), readStoredUnlock(id)))
       } catch (e) {
-        toast.error(
-          apiMessage(e instanceof Error ? e.message : undefined, 'errors.generic'),
-        )
+        toastApiError(e, 'errors.generic')
         navigate('/studio')
       } finally {
         if (alive) setLoading(false)
@@ -257,7 +270,7 @@ export function StudioEditorPage() {
     return () => {
       alive = false
     }
-  }, [user, id, hydrate, apiMessage, navigate])
+  }, [user, id, hydrate, toastApiError, navigate])
 
   useEffect(() => {
     let alive = true
@@ -378,9 +391,7 @@ export function StudioEditorPage() {
         })
       }
     } catch (e) {
-      toast.error(
-        apiMessage(e instanceof Error ? e.message : undefined, 'studio.saveFailed'),
-      )
+      toastApiError(e, 'studio.saveFailed')
     } finally {
       setSaving(false)
     }
@@ -401,9 +412,7 @@ export function StudioEditorPage() {
       )
       navigate(`/recipes/${detail.id}`)
     } catch (e) {
-      toast.error(
-        apiMessage(e instanceof Error ? e.message : undefined, 'studio.publishFailed'),
-      )
+      toastApiError(e, 'studio.publishFailed')
     } finally {
       setPublishing(false)
     }
@@ -423,9 +432,7 @@ export function StudioEditorPage() {
       toast.success(t('studio.deleted'))
       navigate('/studio')
     } catch (e) {
-      toast.error(
-        apiMessage(e instanceof Error ? e.message : undefined, 'studio.deleteFailed'),
-      )
+      toastApiError(e, 'studio.deleteFailed')
     } finally {
       setDeleting(false)
     }
@@ -459,9 +466,7 @@ export function StudioEditorPage() {
       }
       setCoverUrl(undefined)
       setCoverAssetId(null)
-      toast.error(
-        apiMessage(e instanceof Error ? e.message : undefined, 'media.uploadFailed'),
-      )
+      toastApiError(e, 'media.uploadFailed')
     } finally {
       setCoverUploading(false)
     }
@@ -515,12 +520,7 @@ export function StudioEditorPage() {
       toast.success(t('ingredients.proposeSuccess'))
       setProposeName('')
     } catch (e) {
-      toast.error(
-        apiMessage(
-          e instanceof Error ? e.message : undefined,
-          'ingredients.proposeFailed',
-        ),
-      )
+      toastApiError(e, 'ingredients.proposeFailed')
     }
   }
 
@@ -537,17 +537,35 @@ export function StudioEditorPage() {
           i === index
             ? {
                 ...s,
-                media: [...(s.media ?? []), { mediaAssetId: asset.id }],
+                media: [
+                  ...(s.media ?? []),
+                  {
+                    mediaAssetId: asset.id,
+                    url: asset.url,
+                    mediaType: asset.mediaType,
+                  },
+                ],
               }
             : s,
         ),
       )
       toast.success(t('media.uploaded'))
     } catch (e) {
-      toast.error(
-        apiMessage(e instanceof Error ? e.message : undefined, 'media.uploadFailed'),
-      )
+      toastApiError(e, 'media.uploadFailed')
     }
+  }
+
+  function removeStepMedia(stepIndex: number, mediaAssetId: string) {
+    setSteps((prev) =>
+      prev.map((s, i) =>
+        i === stepIndex
+          ? {
+              ...s,
+              media: (s.media ?? []).filter((m) => m.mediaAssetId !== mediaAssetId),
+            }
+          : s,
+      ),
+    )
   }
 
   const selectedIds = useMemo(
@@ -1065,17 +1083,37 @@ export function StudioEditorPage() {
                     <input
                       className="field__control field__control--file"
                       type="file"
-                      accept="image/*,video/*"
-                      onChange={(e) =>
+                      accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime"
+                      onChange={(e) => {
                         void addStepMedia(idx, e.target.files?.[0] ?? null)
-                      }
+                        e.target.value = ''
+                      }}
                     />
                   </label>
-                  <p className="muted">
-                    {(step.media?.length ?? 0) > 0
-                      ? t('studio.mediaCount', { count: step.media!.length })
-                      : t('studio.noMedia')}
-                  </p>
+                  {(step.media?.length ?? 0) > 0 ? (
+                    <ul className="step-media-editor">
+                      {step.media!.map((m) => (
+                        <li key={m.mediaAssetId} className="step-media-editor__item">
+                          {m.mediaType === 'VIDEO' && m.url ? (
+                            <video src={m.url} controls playsInline preload="metadata" />
+                          ) : m.url ? (
+                            <img src={m.url} alt="" />
+                          ) : (
+                            <span className="muted">{m.mediaAssetId.slice(0, 8)}…</span>
+                          )}
+                          <button
+                            type="button"
+                            className="btn ghost compact"
+                            onClick={() => removeStepMedia(idx, m.mediaAssetId)}
+                          >
+                            {t('ingredients.remove')}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="muted">{t('studio.noMedia')}</p>
+                  )}
                 </>
               ) : (
                 <>
@@ -1100,12 +1138,7 @@ export function StudioEditorPage() {
                               })
                               toast.success(t('studio.subRecipeLinked'))
                             } catch (e) {
-                              toast.error(
-                                apiMessage(
-                                  e instanceof Error ? e.message : undefined,
-                                  'errors.generic',
-                                ),
-                              )
+                              toastApiError(e, 'errors.generic')
                             }
                           }}
                         >

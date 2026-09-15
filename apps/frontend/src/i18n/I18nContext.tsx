@@ -7,6 +7,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
+import { toast } from 'sonner'
 import {
   DEFAULT_LOCALE,
   isAppLocale,
@@ -79,5 +80,23 @@ export function useApiMessage() {
       return message
     },
     [t],
+  )
+}
+
+/** Toast API errors; skips duplicate when session-expired already handled globally. */
+export function useApiErrorToast() {
+  const apiMessage = useApiMessage()
+  return useCallback(
+    (error: unknown, fallbackKey: string) => {
+      const message = error instanceof Error ? error.message : undefined
+      if (message === 'errors.sessionExpired') {
+        toast.error(apiMessage(message, 'auth.sessionExpired'), {
+          id: 'session-expired',
+        })
+        return
+      }
+      toast.error(apiMessage(message, fallbackKey))
+    },
+    [apiMessage],
   )
 }

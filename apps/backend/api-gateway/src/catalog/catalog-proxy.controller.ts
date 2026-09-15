@@ -83,6 +83,22 @@ export class CatalogProxyController {
     );
   }
 
+  @Post('ingredients/catalog')
+  createCatalog(
+    @Body() body: unknown,
+    @Headers('authorization') authorization?: string,
+    @Headers('accept-language') acceptLanguage?: string,
+  ) {
+    return this.proxy.forward(
+      this.recipeServiceUrl,
+      'POST',
+      '/ingredients/catalog',
+      body,
+      undefined,
+      this.fwd(authorization, acceptLanguage),
+    );
+  }
+
   @Get('ingredients/moderation')
   moderation(
     @Headers('authorization') authorization?: string,

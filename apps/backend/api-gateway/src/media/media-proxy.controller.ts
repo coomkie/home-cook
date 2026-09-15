@@ -41,6 +41,7 @@ export class MediaProxyController {
   @Post('uploads/:id/complete')
   complete(
     @Param('id') id: string,
+    @Body() body: unknown,
     @Headers('authorization') authorization?: string,
     @Headers('accept-language') acceptLanguage?: string,
   ) {
@@ -48,7 +49,7 @@ export class MediaProxyController {
       this.recipeServiceUrl,
       'POST',
       `/media/uploads/${id}/complete`,
-      undefined,
+      body ?? {},
       undefined,
       { authorization, 'accept-language': acceptLanguage },
     );

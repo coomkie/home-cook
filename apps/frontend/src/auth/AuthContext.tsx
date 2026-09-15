@@ -7,13 +7,16 @@ import {
   useState,
   type ReactNode,
 } from 'react'
+import { toast } from 'sonner'
 import {
   api,
   clearTokens,
   getAccessToken,
   getRefreshToken,
   saveTokens,
+  SESSION_EXPIRED_EVENT,
 } from '../api/client'
+import { useI18n } from '../i18n/I18nContext'
 import type { AuthUser, LoginPayload, RegisterPayload } from '../types'
 
 interface AuthContextValue {
@@ -28,15 +31,20 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | null>(null)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const { t } = useI18n()
   const [user, setUser] = useState<AuthUser | null>(null)
   const [loading, setLoading] = useState(true)
 
   const refreshProfile = useCallback(async () => {
-    if (!getAccessToken()) {
+    if (!getAccessToken() && !getRefreshToken()) {
       setUser(null)
       return
     }
     try {
+      if (!getAccessToken() && getRefreshToken()) {
+        const tokens = await api.refresh(getRefreshToken()!)
+        saveTokens(tokens)
+      }
       const me = await api.getMe()
       setUser(me)
     } catch {
@@ -71,6 +79,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       alive = false
     }
   }, [refreshProfile])
+
+  useEffect(() => {
+    const onExpired = () => {
+      setUser(null)
+      toast.error(t('auth.sessionExpired'), { id: 'session-expired' })
+    }
+    window.addEventListener(SESSION_EXPIRED_EVENT, onExpired)
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, onExpired)
+  }, [t])
 
   const login = useCallback(async (payload: LoginPayload) => {
     const tokens = await api.login(payload)

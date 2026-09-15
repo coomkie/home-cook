@@ -182,7 +182,12 @@ export interface DraftStep {
   title?: string
   instruction?: string
   tip?: string
-  media?: Array<{ mediaAssetId: string; caption?: string }>
+  media?: Array<{
+    mediaAssetId: string
+    caption?: string
+    url?: string
+    mediaType?: 'IMAGE' | 'VIDEO' | string
+  }>
   childRecipeVersionId?: string
   servingMultiplier?: number
 }

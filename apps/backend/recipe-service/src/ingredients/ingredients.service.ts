@@ -90,6 +90,44 @@ export class IngredientsService {
     return this.toDto(saved);
   }
 
+  async createCatalog(
+    userId: string,
+    input: {
+      name: string;
+      nameEn?: string;
+      imageAssetId?: string;
+      isStaple?: boolean;
+    },
+  ) {
+    const name = input.name.trim();
+    if (name.length < 2) {
+      throw new BadRequestException('validation.displayNameMin');
+    }
+
+    let slug = slugify(name);
+    if (!slug) slug = `ing-${Date.now().toString(36)}`;
+    const exists = await this.ingredientsRepo.exist({ where: { slug } });
+    if (exists) slug = `${slug}-${Date.now().toString(36)}`;
+
+    if (input.imageAssetId) {
+      await this.media.requireReadyOwned(input.imageAssetId, userId);
+    }
+
+    const saved = await this.ingredientsRepo.save(
+      this.ingredientsRepo.create({
+        canonicalName: name,
+        nameEn: input.nameEn?.trim() || null,
+        slug,
+        imageAssetId: input.imageAssetId ?? null,
+        status: 'APPROVED',
+        isStaple: !!input.isStaple,
+        createdByUserId: userId,
+        approvedByUserId: userId,
+      }),
+    );
+    return this.toDto(saved);
+  }
+
   async listPending() {
     const rows = await this.ingredientsRepo.find({
       where: { status: 'PENDING' },
